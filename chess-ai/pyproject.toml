@@ -1,0 +1,11 @@
+[project]
+name = "chess-ai"
+version = "0.1.0"
+dependencies = [
+    "chess",
+    "gymnasium",
+    "torch",
+    "numpy",
+    "pyyaml",
+    "kagglehub",
+]
