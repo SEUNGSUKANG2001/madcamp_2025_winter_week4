@@ -8,4 +8,6 @@ dependencies = [
     "numpy",
     "pyyaml",
     "kagglehub",
+    "datasets",
+    "zstandard",
 ]
