@@ -5,125 +5,146 @@ import chess.pgn
 import time
 import multiprocessing
 import shutil
-from datasets import Dataset, concatenate_datasets, load_from_disk
+from datasets import Dataset
+from tqdm import tqdm
+from functools import partial
 
-def process_single_file(args):
+def process_single_game(pgn_text, target_headers):
     """
-    하나의 .pgn.zst 파일을 처리하여 임시 Dataset으로 저장합니다.
+    단일 PGN 문자열을 파싱하여 필터링 및 데이터 추출을 수행합니다.
     """
-    filename, raw_dir, temp_dir, target_headers = args
-    input_path = os.path.join(raw_dir, filename)
-    temp_output_path = os.path.join(temp_dir, filename.replace(".pgn.zst", ".tmp_ds"))
-    
-    print(f"[{filename}] 처리 시작...")
-    
-    games = []
-    count_total = 0
-    count_saved = 0
-    
     try:
-        with open(input_path, 'rb') as f_in:
-            dctx = zstd.ZstdDecompressor()
-            with dctx.stream_reader(f_in) as reader:
-                text_stream = io.TextIOWrapper(reader, encoding='utf-8')
-                
-                while True:
-                    game = chess.pgn.read_game(text_stream)
-                    if game is None:
-                        break
-                    
-                    count_total += 1
-                    
-                    # 필터: 시간패, 기권, 규칙위반 등을 제외
-                    termination = game.headers.get("Termination", "").lower()
-                    is_unusual = any(x in termination for x in ["time", "abandoned", "rules", "illegal", "forfeit", "infraction"])
-                    
-                    if is_unusual:
-                        continue
-                    
-                    # 데이터 추출
-                    game_data = {k: game.headers.get(k, "") for k in target_headers}
-                    
-                    # 기보(Moves) 추출 (eval 및 주석 제거)
-                    exporter = chess.pgn.StringExporter(columns=None, headers=False, comments=False, variations=False)
-                    game_data["moves"] = game.accept(exporter)
-                    
-                    games.append(game_data)
-                    count_saved += 1
-                    
-                    if count_saved % 10000 == 0:
-                        print(f"  [{filename}] {count_total} 경기 읽음, {count_saved} 경기 저장 중...")
-        
-        if games:
-            ds = Dataset.from_list(games)
-            ds.save_to_disk(temp_output_path)
-            print(f"[{filename}] 완료! ({count_saved} 경기 저장됨)")
-            return temp_output_path
-        else:
-            print(f"[{filename}] 저장할 경기가 없습니다.")
+        game = chess.pgn.read_game(io.StringIO(pgn_text))
+        if game is None:
             return None
-            
-    except Exception as e:
-        print(f"Error processing {filename}: {e}")
+        
+        # 필터: 시간패, 기권, 규칙위반 등을 제외
+        termination = game.headers.get("Termination", "").lower()
+        is_unusual = any(x in termination for x in ["time", "abandoned", "rules", "illegal", "forfeit", "infraction"])
+        
+        if is_unusual:
+            return None
+        
+        # 데이터 추출
+        game_data = {k: game.headers.get(k, "") for k in target_headers}
+        
+        # 기보(Moves) 추출 (eval 및 주석 제거)
+        exporter = chess.pgn.StringExporter(columns=None, headers=False, comments=False, variations=False)
+        game_data["moves"] = game.accept(exporter)
+        
+        return game_data
+    except Exception:
         return None
+
+def get_raw_games_iterator(text_stream):
+    """
+    PGN 스트림에서 게임 하나하나의 raw text를 추출하는 이터레이터입니다.
+    """
+    current_game = []
+    for line in text_stream:
+        # 새로운 게임의 시작을 알리는 [Event "..." ] 헤더 감지
+        if line.startswith("[Event ") and current_game:
+            yield "".join(current_game)
+            current_game = [line]
+        else:
+            current_game.append(line)
+    if current_game:
+        yield "".join(current_game)
 
 def build_dataset():
     """
-    raw 데이터의 .zst 파일들을 병렬로 처리하여 datasets 형식으로 저장합니다.
+    raw 데이터의 .zst 파일들을 하나씩 순차적으로 처리합니다.
+    파일 내부의 경기들은 병렬로 처리하여 실시간 진행률을 표시합니다.
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(script_dir, "../.."))
     raw_dir = os.path.join(project_root, "data", "raw")
     processed_dir = os.path.join(project_root, "data", "processed")
-    dataset_output_path = os.path.join(processed_dir, "chess_dataset")
-    temp_dir = os.path.join(processed_dir, "temp_chunks")
     
     os.makedirs(processed_dir, exist_ok=True)
-    os.makedirs(temp_dir, exist_ok=True)
     
-    files = [f for f in os.listdir(raw_dir) if f.endswith(".pgn.zst")]
+    # 특정 파일(lichess-2500-180.pgn.zst)만 처리하도록 수정
+    target_file = "lichess-2500-180.pgn.zst"
+    if target_file in os.listdir(raw_dir):
+        files = [target_file]
+    else:
+        print(f"Error: {target_file}을 {raw_dir}에서 찾을 수 없습니다.")
+        return
+    
     target_headers = ["Site", "Date", "White", "Black", "Result", "ECO", "UTCDate", "Termination", "Link"]
     
-    print(f"병렬 처리 시작 (파일 수: {len(files)}, CPU 코어: {multiprocessing.cpu_count()})")
-    start_time = time.time()
-    
-    # 병렬 작업 준비
-    pool_args = [(f, raw_dir, temp_dir, target_headers) for f in files]
-    
-    with multiprocessing.Pool() as pool:
-        temp_ds_paths = pool.map(process_single_file, pool_args)
-    
-    # 유효한 경로만 필터링
-    valid_paths = [p for p in temp_ds_paths if p is not None]
-    
-    if not valid_paths:
-        print("에러: 저장된 데이터가 없습니다.")
-        return
+    print(f"데이터셋 빌드 시작 (대상 파일: {target_file}, CPU 코어: {multiprocessing.cpu_count()})")
 
-    print("\n데이터셋 병합 중...")
-    datasets_to_combine = [load_from_disk(p) for p in valid_paths]
-    final_dataset = concatenate_datasets(datasets_to_combine)
-    
-    print(f"최종 결과를 {dataset_output_path}에 저장 중...")
-    final_dataset.save_to_disk(dataset_output_path)
-    
-    # 임시 디렉토리 삭제
-    print("임시 파일 정리 중...")
-    shutil.rmtree(temp_dir)
-    
-    end_time = time.time()
-    print(f"\n모든 작업 완료!")
-    print(f"소요 시간: {end_time - start_time:.2f}초")
-    print(f"총 {len(final_dataset)} 개의 경기가 저장되었습니다.")
+    for filename in files:
+        input_path = os.path.join(raw_dir, filename)
+        # 파일별로 개별 데이터셋 저장 경로 설정
+        dataset_name = filename.replace(".pgn.zst", "_dataset")
+        output_path = os.path.join(processed_dir, dataset_name)
+        
+        print(f"\n[{filename}] 처리 중...")
+        file_size = os.path.getsize(input_path)
+        start_time = time.time()
+        
+        # 중간 파일 (JSONL) 경로
+        temp_jsonl = os.path.join(processed_dir, f"{filename}.jsonl")
+        game_count = 0
+        
+        try:
+            with open(input_path, 'rb') as f_in, open(temp_jsonl, 'w', encoding='utf-8') as f_out:
+                dctx = zstd.ZstdDecompressor()
+                with dctx.stream_reader(f_in) as reader:
+                    text_stream = io.TextIOWrapper(reader, encoding='utf-8')
+                    raw_games = get_raw_games_iterator(text_stream)
+                    
+                    with multiprocessing.Pool() as pool:
+                        func = partial(process_single_game, target_headers=target_headers)
+                        pbar = tqdm(total=file_size, desc=f"  {filename}", unit="B", unit_scale=True, unit_divisor=1024)
+                        
+                        last_pos = 0
+                        import json
+                        for game_data in pool.imap(func, raw_games, chunksize=1000):
+                            if game_data:
+                                f_out.write(json.dumps(game_data) + "\n")
+                                game_count += 1
+                            
+                            curr_pos = f_in.tell()
+                            pbar.update(curr_pos - last_pos)
+                            last_pos = curr_pos
+                            pbar.set_postfix(games=game_count, refresh=False)
+                        
+                        pbar.close()
+            
+            if game_count > 0:
+                print(f"  [{filename}] JSONL을 Dataset으로 변환 중... (이 과정은 시간이 다소 소요될 수 있습니다)")
+                ds = Dataset.from_json(temp_jsonl)
+                ds.save_to_disk(output_path)
+                
+                # 중간 파일 삭제
+                if os.path.exists(temp_jsonl):
+                    os.remove(temp_jsonl)
+                    
+                elapsed = time.time() - start_time
+                print(f"  [{filename}] 완료! {game_count} 경기 저장됨 (소요 시간: {elapsed:.2f}초)")
+            else:
+                print(f"  [{filename}] 저장할 데이터가 없습니다.")
+                if os.path.exists(temp_jsonl):
+                    os.remove(temp_jsonl)
+                
+        except Exception as e:
+            print(f"Error processing {filename}: {e}")
+
+    print(f"\n모든 파일 작업 완료!")
 
 if __name__ == "__main__":
-    # 라이브러리 체크
+    # 필요한 라이브러리 체크
     try:
         import chess.pgn
         import datasets
+        from tqdm import tqdm
     except ImportError as e:
         print(f"Error: Required library not installed. {e}")
-        print("Please install dependencies: pip install python-chess datasets zstandard")
+        print("Please install dependencies: pip install python-chess datasets zstandard tqdm")
         exit(1)
         
     build_dataset()
+
