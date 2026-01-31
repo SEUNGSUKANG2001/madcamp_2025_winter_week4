@@ -26,11 +26,39 @@
 
 이 프로젝트는 `poetry` 또는 `pip`을 사용하여 의존성을 관리합니다.
 
+#### 방법 1: 가상환경 사용 (권장)
+
 ```bash
+# 가상환경 생성
+python3 -m venv venv
+
+# 가상환경 활성화 (macOS/Linux)
+source venv/bin/activate
+
+# 의존성 설치
 pip install -r requirements.txt
-# 또는
+# 또는 pyproject.toml 기반 설치
+pip install -e .
+```
+
+#### 방법 2: Poetry 사용
+
+```bash
+# Poetry 설치 (없는 경우)
+curl -sSL https://install.python-poetry.org | python3 -
+
+# 의존성 설치
 poetry install
 ```
+
+#### 방법 3: 직접 설치 (시스템 패키지 관리자 사용 시)
+
+```bash
+# 필요한 패키지 직접 설치
+pip install --break-system-packages datasets chess torch numpy pyyaml h5py tqdm zstandard
+```
+
+**주의**: macOS에서 `externally-managed-environment` 오류가 발생하면 가상환경 사용을 권장합니다.
 
 ### 데이터 다운로드
 
