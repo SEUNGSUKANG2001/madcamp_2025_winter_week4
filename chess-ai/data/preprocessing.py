@@ -3,7 +3,7 @@ Data preprocessing module for chess AI.
 
 This module handles:
 1. PGN file parsing and filtering
-2. Board encoding (119 planes AlphaZero style)
+2. Board encoding (33 planes)
 3. Move indexing (0-4095)
 4. Dataset creation and saving
 """
@@ -92,23 +92,22 @@ def load_pgn_file(path: str, min_elo: int = 2600) -> List[chess.pgn.Game]:
 
 def encode_board(board: chess.Board) -> np.ndarray:
     """
-    Encode chess board to neural network input (119 planes, 8x8).
+    Encode chess board to neural network input (33 planes, 8x8).
     
-    Board Encoding (119 planes):
+    Board Encoding (33 planes):
     - 12 planes: current position (6 piece types × 2 colors)
-    - 12 planes: previous position (for move history)
+    - 12 planes: previous position (for move history, currently zeros)
     - 4 planes: castling rights
     - 1 plane: en passant
     - 1 plane: color to move
     - 1 plane: move count
     - 2 planes: repetition counters
-    - 86 planes: additional features (optional, reserved for future use)
     
     Args:
         board: python-chess Board object
         
     Returns:
-        numpy array of shape (119, 8, 8)
+        numpy array of shape (33, 8, 8)
         
     Raises:
         ValueError: if board is invalid
@@ -117,7 +116,7 @@ def encode_board(board: chess.Board) -> np.ndarray:
         raise ValueError(f"Expected chess.Board, got {type(board)}")
     
     try:
-        planes = np.zeros((119, 8, 8), dtype=np.float32)
+        planes = np.zeros((33, 8, 8), dtype=np.float32)
         
         # Piece types: PAWN=1, KNIGHT=2, BISHOP=3, ROOK=4, QUEEN=5, KING=6
         piece_types = [chess.PAWN, chess.KNIGHT, chess.BISHOP, 
@@ -288,7 +287,7 @@ def process_game(game: chess.pgn.Game) -> List[Dict]:
         
     Returns:
         List of dictionaries, each containing:
-        - position: encoded board (119, 8, 8)
+        - position: encoded board (33, 8, 8)
         - move: move index (0-4095)
         - value: game outcome from current player's perspective (-1, 0, 1)
         - move_number: move number in game

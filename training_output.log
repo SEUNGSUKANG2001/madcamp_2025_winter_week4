@@ -1,0 +1,19 @@
+2026-01-31 08:06:34,812 - __main__ - INFO - Logging to both console and training.log file
+2026-01-31 08:06:34,813 - __main__ - INFO - ============================================================
+2026-01-31 08:06:34,813 - __main__ - INFO - Chess AI Training - Enhanced Logging
+2026-01-31 08:06:34,814 - __main__ - INFO - ============================================================
+2026-01-31 08:06:34,814 - __main__ - INFO - Train dataset: lichess-2500-180_dataset
+2026-01-31 08:06:34,814 - __main__ - INFO - Val dataset: lichess-2500-180_dataset
+2026-01-31 08:06:34,814 - __main__ - INFO - Epochs: 1
+2026-01-31 08:06:34,814 - __main__ - INFO - Batch size: 32
+2026-01-31 08:06:34,814 - __main__ - INFO - Learning rate: 0.001
+2026-01-31 08:06:34,814 - __main__ - INFO - Max samples: 500
+2026-01-31 08:06:34,814 - __main__ - INFO - Cache in memory: True
+2026-01-31 08:06:34,814 - __main__ - INFO - ============================================================
+2026-01-31 08:06:34,814 - __main__ - INFO - 
+[1/4] Loading training dataset...
+2026-01-31 08:06:34,965 - data.preprocessing - INFO - Loaded dataset from /workspace/madcamp_2025_winter_week4/data/processed/lichess-2500-180_dataset: 7088787 samples
+2026-01-31 08:06:34,966 - data.preprocessing - INFO - Dataset columns: ['Site', 'Date', 'White', 'Black', 'Result', 'ECO', 'UTCDate', 'Termination', 'Link', 'moves']
+2026-01-31 08:06:34,966 - data.dataset - INFO - Loaded HuggingFace dataset: 7088787 games
+2026-01-31 08:06:34,966 - data.dataset - INFO - Processing games to positions (this may take a while)...
+2026-01-31 08:06:34,966 - data.dataset - INFO - Processing games to positions (this may take a while)...

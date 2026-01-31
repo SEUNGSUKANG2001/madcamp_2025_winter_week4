@@ -13,6 +13,13 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+    wandb = None
+
 from models.architecture import HybridChessNet
 from models.utils import save_checkpoint, load_checkpoint, clip_gradients
 from data.dataset import ChessDataset, create_data_loaders
@@ -157,9 +164,11 @@ class SupervisedTrainer:
         
         # Setup scheduler
         T_max = config.get('epochs', 50)
+        # Ensure T_0 is at least 1
+        T_0 = max(1, T_max // 2)
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
             self.optimizer,
-            T_0=T_max // 2,
+            T_0=T_0,
             T_mult=2
         )
         
@@ -175,6 +184,36 @@ class SupervisedTrainer:
         self.current_epoch = 0
         self.best_val_loss = float('inf')
         self.checkpoint_dir = config.get('checkpoint_dir', 'checkpoints')
+        
+        # Wandb setup
+        self.use_wandb = config.get('use_wandb', True) and WANDB_AVAILABLE
+        self.wandb_project = config.get('wandb_project', 'chess-ai')
+        self.wandb_run_name = config.get('wandb_run_name', None)
+        self.wandb_entity = config.get('wandb_entity', None)
+        
+        if self.use_wandb:
+            wandb.init(
+                project=self.wandb_project,
+                name=self.wandb_run_name,
+                entity=self.wandb_entity,
+                config={
+                    'learning_rate': lr,
+                    'weight_decay': weight_decay,
+                    'epochs': T_max,
+                    'value_weight': value_weight,
+                    'use_mixed_precision': self.use_amp,
+                    'batch_size': train_loader.batch_size if hasattr(train_loader, 'batch_size') else None,
+                    'model_parameters': model.count_parameters(),
+                    'device': str(self.device),
+                    'input_channels': model.input_channels,
+                    'cnn_channels': model.cnn_channels,
+                    'transformer_embed_dim': model.transformer_embed_dim,
+                    'model_type': 'HybridChessNet',
+                }
+            )
+            logger.info(f"Wandb initialized: project={self.wandb_project}, run={self.wandb_run_name}")
+        elif config.get('use_wandb', True) and not WANDB_AVAILABLE:
+            logger.warning("Wandb requested but not available. Install with: pip install wandb")
         
         logger.info(f"Initialized trainer on device: {self.device}")
         logger.info(f"Model parameters: {model.count_parameters():,}")
@@ -245,6 +284,19 @@ class SupervisedTrainer:
                 'loss': loss_dict['total_loss'],
                 'acc': accuracies['top_1_accuracy']
             })
+            
+            # Log batch metrics to wandb (every 100 batches to avoid too much logging)
+            if self.use_wandb and batch_idx % 100 == 0:
+                wandb.log({
+                    'train/batch_loss': loss_dict['total_loss'],
+                    'train/batch_policy_loss': loss_dict['policy_loss'],
+                    'train/batch_value_loss': loss_dict['value_loss'],
+                    'train/batch_top1_acc': accuracies['top_1_accuracy'],
+                    'train/batch_top3_acc': accuracies['top_3_accuracy'],
+                    'train/batch_top5_acc': accuracies['top_5_accuracy'],
+                    'train/learning_rate': self.optimizer.param_groups[0]['lr'],
+                    'train/batch': self.current_epoch * len(self.train_loader) + batch_idx,
+                })
         
         # Average metrics
         metrics = {
@@ -344,10 +396,33 @@ class SupervisedTrainer:
             logger.info(f"Val - Loss: {val_metrics['val_loss']:.4f}, "
                        f"Top-1 Acc: {val_metrics['val_top_1_accuracy']:.4f}")
             
+            # Log to wandb
+            if self.use_wandb:
+                log_dict = {
+                    'epoch': epoch + 1,
+                    'train/loss': train_metrics['train_loss'],
+                    'train/policy_loss': train_metrics['train_policy_loss'],
+                    'train/value_loss': train_metrics['train_value_loss'],
+                    'train/top1_accuracy': train_metrics['top_1_accuracy'],
+                    'train/top3_accuracy': train_metrics['top_3_accuracy'],
+                    'train/top5_accuracy': train_metrics['top_5_accuracy'],
+                    'val/loss': val_metrics['val_loss'],
+                    'val/policy_loss': val_metrics['val_policy_loss'],
+                    'val/value_loss': val_metrics['val_value_loss'],
+                    'val/top1_accuracy': val_metrics['val_top_1_accuracy'],
+                    'val/top3_accuracy': val_metrics['val_top_3_accuracy'],
+                    'val/top5_accuracy': val_metrics['val_top_5_accuracy'],
+                    'learning_rate': self.optimizer.param_groups[0]['lr'],
+                }
+                wandb.log(log_dict)
+            
             # Save checkpoint
             is_best = val_metrics['val_loss'] < self.best_val_loss
             if is_best:
                 self.best_val_loss = val_metrics['val_loss']
+                if self.use_wandb:
+                    wandb.run.summary['best_val_loss'] = self.best_val_loss
+                    wandb.run.summary['best_epoch'] = epoch + 1
             
             if (epoch + 1) % save_every == 0 or is_best:
                 checkpoint_path = f"{self.checkpoint_dir}/checkpoint_epoch_{epoch+1}.pt"
@@ -360,6 +435,16 @@ class SupervisedTrainer:
                     metrics={**train_metrics, **val_metrics},
                     is_best=is_best
                 )
+                
+                # Log checkpoint to wandb as artifact (optional, can be disabled for large checkpoints)
+                if self.use_wandb and config.get('wandb_log_checkpoints', False):
+                    artifact = wandb.Artifact(f"checkpoint-epoch-{epoch+1}", type="model")
+                    artifact.add_file(checkpoint_path)
+                    wandb.log_artifact(artifact)
+        
+        # Finish wandb run
+        if self.use_wandb:
+            wandb.finish()
 
 
 if __name__ == "__main__":

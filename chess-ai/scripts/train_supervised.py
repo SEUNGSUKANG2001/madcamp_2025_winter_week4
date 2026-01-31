@@ -51,6 +51,14 @@ def main():
                        help='Device to train on (cuda/cpu/auto). auto will use CUDA if available, otherwise CPU')
     parser.add_argument('--min-elo', type=int, default=2600,
                        help='Minimum ELO rating for filtering')
+    parser.add_argument('--wandb-project', type=str, default='chess-ai',
+                       help='Wandb project name')
+    parser.add_argument('--wandb-run-name', type=str, default=None,
+                       help='Wandb run name (default: auto-generated)')
+    parser.add_argument('--wandb-entity', type=str, default=None,
+                       help='Wandb entity/team name')
+    parser.add_argument('--no-wandb', action='store_true',
+                       help='Disable wandb logging')
     
     args = parser.parse_args()
     
@@ -85,7 +93,11 @@ def main():
         'epochs': args.epochs,
         'value_weight': 1.0,
         'use_mixed_precision': True,
-        'checkpoint_dir': args.checkpoint_dir
+        'checkpoint_dir': args.checkpoint_dir,
+        'use_wandb': not args.no_wandb,
+        'wandb_project': args.wandb_project,
+        'wandb_run_name': args.wandb_run_name,
+        'wandb_entity': args.wandb_entity,
     }
     
     # Create trainer

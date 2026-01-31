@@ -6,7 +6,7 @@ This module implements safe augmentation techniques that preserve game legality.
 """
 
 import logging
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 import numpy as np
 import chess
 import chess.pgn
@@ -220,7 +220,7 @@ def augment_game_data(position: np.ndarray, move_idx: int, value: float,
     Augment a single training sample.
     
     Args:
-        position: Encoded board position (119, 8, 8)
+        position: Encoded board position (33, 8, 8)
         move_idx: Move index
         value: Game outcome value
         board: chess.Board object (for move recovery)

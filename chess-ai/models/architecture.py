@@ -182,7 +182,7 @@ class HybridChessNet(nn.Module):
     
     def __init__(
         self,
-        input_channels: int = 119,
+        input_channels: int = 33,
         cnn_channels: int = 256,
         num_res_blocks: int = 8,
         transformer_embed_dim: int = 512,
@@ -196,7 +196,7 @@ class HybridChessNet(nn.Module):
         Initialize hybrid chess network.
         
         Args:
-            input_channels: Number of input planes (119 for AlphaZero encoding)
+            input_channels: Number of input planes (33 for chess board encoding)
             cnn_channels: Number of channels in CNN stem
             num_res_blocks: Number of residual blocks in CNN stem
             transformer_embed_dim: Embedding dimension for transformer
@@ -314,7 +314,7 @@ class HybridChessNet(nn.Module):
         Forward pass.
         
         Args:
-            x: Input tensor of shape (B, 119, 8, 8)
+            x: Input tensor of shape (B, 33, 8, 8)
             
         Returns:
             Tuple of (policy_logits, value)
@@ -387,7 +387,7 @@ class HybridChessNet(nn.Module):
 if __name__ == "__main__":
     # Test architecture
     model = HybridChessNet(
-        input_channels=119,
+        input_channels=33,
         cnn_channels=256,
         num_res_blocks=8,
         transformer_embed_dim=512,
@@ -398,7 +398,7 @@ if __name__ == "__main__":
     print(f"Model parameters: {model.count_parameters():,}")
     
     # Test forward pass
-    x = torch.randn(2, 119, 8, 8)
+    x = torch.randn(2, 33, 8, 8)
     policy, value = model(x)
     
     print(f"Input shape: {x.shape}")

@@ -241,7 +241,7 @@ if __name__ == "__main__":
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     
     print(f"Parameters: {count_parameters(model):,}")
-    print(get_model_summary(model, (119, 8, 8)))
+    print(get_model_summary(model, (33, 8, 8)))
     
     # Test checkpointing
     test_path = "/tmp/test_checkpoint.pt"

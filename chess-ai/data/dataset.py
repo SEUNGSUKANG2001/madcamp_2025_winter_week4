@@ -47,7 +47,8 @@ class ChessDataset(Dataset):
         augment_prob: float = 0.5,
         cache_in_memory: bool = False,
         min_elo: int = 2600,
-        script_path: Optional[str] = None
+        script_path: Optional[str] = None,
+        max_games: Optional[int] = None
     ):
         """
         Initialize chess dataset.
@@ -67,6 +68,7 @@ class ChessDataset(Dataset):
         self.cache_in_memory = cache_in_memory
         self.min_elo = min_elo
         self.format = format
+        self.max_games = max_games
         
         # Determine dataset path
         if data_path is None:
@@ -86,12 +88,25 @@ class ChessDataset(Dataset):
                     self.length = len(self.dataset)
                     logger.info(f"Loaded HuggingFace dataset: {self.length} games")
                     
-                    # Process games if needed
+                    # For datasets format, we need to process games to positions
+                    # This is expensive, so we do it lazily during training
+                    # But we need to know the length first
                     if cache_in_memory:
-                        self._process_games_to_positions()
+                        logger.info("Processing games to positions (this may take a while)...")
+                        self._process_games_to_positions(max_games=self.max_games)
                     else:
-                        # Lazy processing
+                        # For lazy loading, we'll process on-the-fly
+                        # But this requires knowing which game contains which position
+                        # For now, we'll estimate length based on average moves per game
+                        # Actual processing will happen during __getitem__
+                        logger.warning(
+                            "Lazy processing for datasets format is slow. "
+                            "Consider using cache_in_memory=True or converting to HDF5 format."
+                        )
+                        # Estimate: average ~40 moves per game, but we'll process on demand
                         self.positions_cache = None
+                        # We can't know exact length without processing, so use game count as estimate
+                        # Actual positions will be generated on-the-fly
                     
                     return
                 except Exception as e:
@@ -116,7 +131,7 @@ class ChessDataset(Dataset):
                 self.length = f.attrs['num_samples']
             logger.info(f"Dataset initialized with {self.length} samples (lazy loading)")
     
-    def _process_games_to_positions(self):
+    def _process_games_to_positions(self, max_games: Optional[int] = None):
         """Process games from datasets format to positions."""
         logger.info("Processing games to positions (this may take a while)...")
         
@@ -126,10 +141,18 @@ class ChessDataset(Dataset):
         all_move_numbers = []
         all_players = []
         
+        max_games = max_games or len(self.dataset)
+        games_to_process = min(max_games, len(self.dataset))
+        
+        logger.info(f"Processing up to {games_to_process} games (out of {len(self.dataset)} total)...")
+        
         for idx, game_data in enumerate(self.dataset):
+            if idx >= max_games:
+                break
             # Filter by ELO if available
-            white_elo = game_data.get('WhiteElo', '')
-            black_elo = game_data.get('BlackElo', '')
+            # Try different possible field names
+            white_elo = game_data.get('WhiteElo', '') or game_data.get('WhiteRating', '') or game_data.get('white_elo', '')
+            black_elo = game_data.get('BlackElo', '') or game_data.get('BlackRating', '') or game_data.get('black_elo', '')
             
             try:
                 white_elo_int = int(white_elo) if white_elo and str(white_elo).isdigit() else 0
@@ -138,32 +161,48 @@ class ChessDataset(Dataset):
                 white_elo_int = 0
                 black_elo_int = 0
             
-            if white_elo_int < self.min_elo or black_elo_int < self.min_elo:
-                continue
+            # If min_elo is set and ELOs are available, filter
+            # Otherwise, if no ELO info, skip filtering (process all)
+            if self.min_elo > 0 and (white_elo_int > 0 or black_elo_int > 0):
+                if white_elo_int < self.min_elo or black_elo_int < self.min_elo:
+                    continue
             
             # Process game
-            positions = process_game_from_datasets(game_data)
+            try:
+                positions = process_game_from_datasets(game_data)
+                
+                for pos_data in positions:
+                    all_positions.append(pos_data['position'])
+                    all_moves.append(pos_data['move'])
+                    all_values.append(pos_data['value'])
+                    all_move_numbers.append(pos_data['move_number'])
+                    all_players.append(pos_data['player'])
+            except Exception as e:
+                logger.warning(f"Error processing game {idx}: {e}")
+                continue
             
-            for pos_data in positions:
-                all_positions.append(pos_data['position'])
-                all_moves.append(pos_data['move'])
-                all_values.append(pos_data['value'])
-                all_move_numbers.append(pos_data['move_number'])
-                all_players.append(pos_data['player'])
-            
-            if (idx + 1) % 1000 == 0:
+            if (idx + 1) % 100 == 0:
                 logger.info(f"Processed {idx + 1}/{len(self.dataset)} games, "
                           f"{len(all_positions)} positions so far")
         
         # Convert to numpy arrays
-        self.positions = np.stack(all_positions) if all_positions else np.array([])
-        self.moves = np.array(all_moves, dtype=np.int32) if all_moves else np.array([], dtype=np.int32)
-        self.values = np.array(all_values, dtype=np.float32) if all_values else np.array([], dtype=np.float32)
-        self.move_numbers = np.array(all_move_numbers, dtype=np.int32) if all_move_numbers else np.array([], dtype=np.int32)
-        self.players = np.array(all_players, dtype=np.int32) if all_players else np.array([], dtype=np.int32)
+        if not all_positions:
+            logger.warning("No positions processed! Check ELO filtering or data format.")
+            self.positions = np.array([])
+            self.moves = np.array([], dtype=np.int32)
+            self.values = np.array([], dtype=np.float32)
+            self.move_numbers = np.array([], dtype=np.int32)
+            self.players = np.array([], dtype=np.int32)
+        else:
+            self.positions = np.stack(all_positions)
+            self.moves = np.array(all_moves, dtype=np.int32)
+            self.values = np.array(all_values, dtype=np.float32)
+            self.move_numbers = np.array(all_move_numbers, dtype=np.int32)
+            self.players = np.array(all_players, dtype=np.int32)
+        
         self.length = len(self.positions)
         
-        logger.info(f"Processed {self.length} positions from {len(self.dataset)} games")
+        logger.info(f"Processed {self.length} positions from {idx + 1} games")
     
     def __len__(self) -> int:
         """Return dataset size."""
@@ -281,12 +320,27 @@ def create_data_loaders(
     Returns:
         Tuple of (train_loader, val_loader)
     """
+    # For datasets format, we need cache_in_memory=True since lazy processing is not implemented
+    # For HDF5 format, we can use lazy loading
+    # First, check what format we'll be using
+    if train_path is None and train_dataset_name:
+        from data.preprocessing import get_dataset_path
+        check_path = get_dataset_path(train_dataset_name, script_path)
+    else:
+        check_path = train_path
+    
+    # Determine if we need to cache in memory (datasets format requires it)
+    need_cache = False
+    if format == 'auto' or format == 'datasets':
+        if os.path.isdir(check_path) and DATASETS_AVAILABLE:
+            need_cache = True  # datasets format requires cache_in_memory
+    
     train_dataset = ChessDataset(
         data_path=train_path,
         dataset_name=train_dataset_name,
         format=format,
         augment=augment_train,
-        cache_in_memory=False,  # Use lazy loading for large datasets
+        cache_in_memory=need_cache,  # Auto-detect based on format
         min_elo=min_elo,
         script_path=script_path
     )
@@ -296,7 +350,7 @@ def create_data_loaders(
         dataset_name=val_dataset_name,
         format=format,
         augment=False,  # No augmentation for validation
-        cache_in_memory=True,  # Cache validation set in memory
+        cache_in_memory=need_cache,  # Auto-detect based on format
         min_elo=min_elo,
         script_path=script_path
     )
@@ -314,8 +368,9 @@ def create_data_loaders(
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=0,  # No workers needed for cached data
-        pin_memory=pin_memory
+        num_workers=0 if need_cache else 2,  # No workers needed for cached data
+        pin_memory=pin_memory,
+        persistent_workers=False if need_cache else (num_workers > 0)
     )
     
     logger.info(f"Created data loaders: train={len(train_dataset)}, val={len(val_dataset)}")

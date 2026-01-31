@@ -1,0 +1,49 @@
+2026-01-31 11:02:57,251 - __main__ - INFO - Logging to both console and training.log file
+2026-01-31 11:02:57,252 - __main__ - INFO - ============================================================
+2026-01-31 11:02:57,252 - __main__ - INFO - Chess AI Training - Enhanced Logging
+2026-01-31 11:02:57,252 - __main__ - INFO - ============================================================
+2026-01-31 11:02:57,252 - __main__ - INFO - Train dataset: lichess-2500-180_dataset
+2026-01-31 11:02:57,252 - __main__ - INFO - Val dataset: lichess-2500-180_dataset
+2026-01-31 11:02:57,252 - __main__ - INFO - Epochs: 1
+2026-01-31 11:02:57,253 - __main__ - INFO - Batch size: 32
+2026-01-31 11:02:57,253 - __main__ - INFO - Learning rate: 0.001
+2026-01-31 11:02:57,253 - __main__ - INFO - Max samples: All
+2026-01-31 11:02:57,253 - __main__ - INFO - Max games: 100
+2026-01-31 11:02:57,253 - __main__ - INFO - Cache in memory: True
+2026-01-31 11:02:57,253 - __main__ - INFO - ============================================================
+2026-01-31 11:02:57,253 - __main__ - INFO - 
+[1/4] Loading training dataset...
+2026-01-31 11:02:57,466 - data.preprocessing - INFO - Loaded dataset from /workspace/madcamp_2025_winter_week4/data/processed/lichess-2500-180_dataset: 7088787 samples
+2026-01-31 11:02:57,467 - data.preprocessing - INFO - Dataset columns: ['Site', 'Date', 'White', 'Black', 'Result', 'ECO', 'UTCDate', 'Termination', 'Link', 'moves']
+2026-01-31 11:02:57,467 - data.dataset - INFO - Loaded HuggingFace dataset: 7088787 games
+2026-01-31 11:02:57,467 - data.dataset - INFO - Processing games to positions (this may take a while)...
+2026-01-31 11:02:57,467 - data.dataset - INFO - Processing games to positions (this may take a while)...
+2026-01-31 11:02:57,467 - data.dataset - INFO - Processing up to 100 games (out of 7088787 total)...
+2026-01-31 11:02:58,746 - data.dataset - INFO - Processed 100/7088787 games, 8745 positions so far
+2026-01-31 11:03:03,930 - data.dataset - INFO - Processed 8745 positions from 101 games
+2026-01-31 11:03:03,940 - __main__ - INFO - Training dataset loaded: 8745 samples
+2026-01-31 11:03:03,941 - __main__ - INFO - 
+[2/4] Loading validation dataset...
+2026-01-31 11:03:04,220 - data.preprocessing - INFO - Loaded dataset from /workspace/madcamp_2025_winter_week4/data/processed/lichess-2500-180_dataset: 7088787 samples
+2026-01-31 11:03:04,221 - data.preprocessing - INFO - Dataset columns: ['Site', 'Date', 'White', 'Black', 'Result', 'ECO', 'UTCDate', 'Termination', 'Link', 'moves']
+2026-01-31 11:03:04,221 - data.dataset - INFO - Loaded HuggingFace dataset: 7088787 games
+2026-01-31 11:03:04,221 - data.dataset - INFO - Processing games to positions (this may take a while)...
+2026-01-31 11:03:04,221 - data.dataset - INFO - Processing games to positions (this may take a while)...
+2026-01-31 11:03:04,221 - data.dataset - INFO - Processing up to 10 games (out of 7088787 total)...
+2026-01-31 11:03:04,346 - data.dataset - INFO - Processed 836 positions from 11 games
+2026-01-31 11:03:04,346 - __main__ - INFO - Validation dataset loaded: 836 samples
+2026-01-31 11:03:04,347 - __main__ - INFO - 
+[3/4] Creating data loaders...
+2026-01-31 11:03:04,347 - __main__ - INFO - Data loaders created: train batches=274, val batches=27
+2026-01-31 11:03:04,348 - __main__ - INFO - 
+[4/4] Initializing model...
+2026-01-31 11:03:04,588 - __main__ - INFO - Model initialized: 27,385,281 parameters
+2026-01-31 11:03:04,588 - __main__ - INFO - 
+============================================================
+2026-01-31 11:03:04,588 - __main__ - INFO - Starting training...
+2026-01-31 11:03:04,589 - __main__ - INFO - ============================================================
+
+2026-01-31 11:03:04,620 - training.supervised - INFO - Using device: cuda
+2026-01-31 11:03:05,246 - training.supervised - INFO - Initialized trainer on device: cuda
+2026-01-31 11:03:05,246 - training.supervised - INFO - Model parameters: 27,385,281
+2026-01-31 11:03:05,247 - training.supervised - INFO - Starting training for 1 epochs
