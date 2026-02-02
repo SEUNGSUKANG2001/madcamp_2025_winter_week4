@@ -222,7 +222,14 @@ class ChessDataset(Dataset):
             # For datasets format, we need to process on-the-fly or use cache
             if hasattr(self, 'positions') and len(self.positions) > 0:
                 # Use cached positions
+                # Load as float, then normalize
                 position = torch.from_numpy(self.positions[idx]).float()
+                
+                # Normalize move count (plane 30)
+                # It was stored as uint8 (raw move number), need to convert to 0-1 range
+                # Cap at 1.0 (equivalent to 100 moves)
+                position[30] = torch.clamp(position[30] / 100.0, max=1.0)
+                
                 move = torch.tensor(self.moves[idx], dtype=torch.long)
                 value = torch.tensor(self.values[idx], dtype=torch.float32)
             else:
@@ -236,12 +243,20 @@ class ChessDataset(Dataset):
             # HDF5 format
             if self.cache_in_memory:
                 position = torch.from_numpy(self.positions[idx]).float()
+                
+                # Normalize move count (plane 30)
+                position[30] = torch.clamp(position[30] / 100.0, max=1.0)
+                
                 move = torch.tensor(self.moves[idx], dtype=torch.long)
                 value = torch.tensor(self.values[idx], dtype=torch.float32)
             else:
                 # Lazy load from disk
                 with h5py.File(self.data_path, 'r') as f:
                     position = torch.from_numpy(f['positions'][idx]).float()
+                    
+                    # Normalize move count (plane 30)
+                    position[30] = torch.clamp(position[30] / 100.0, max=1.0)
+                    
                     move = torch.tensor(f['moves'][idx], dtype=torch.long)
                     value = torch.tensor(f['values'][idx], dtype=torch.float32)
         
@@ -268,6 +283,10 @@ class ChessDataset(Dataset):
         if self.format == 'datasets':
             if hasattr(self, 'positions') and len(self.positions) > 0:
                 positions = torch.from_numpy(self.positions[indices]).float()
+                
+                # Normalize move count (plane 30)
+                positions[:, 30] = torch.clamp(positions[:, 30] / 100.0, max=1.0)
+                
                 moves = torch.tensor(self.moves[indices], dtype=torch.long)
                 values = torch.tensor(self.values[indices], dtype=torch.float32)
             else:
@@ -276,12 +295,20 @@ class ChessDataset(Dataset):
             # HDF5 format
             if self.cache_in_memory:
                 positions = torch.from_numpy(self.positions[indices]).float()
+                
+                # Normalize move count (plane 30)
+                positions[:, 30] = torch.clamp(positions[:, 30] / 100.0, max=1.0)
+                
                 moves = torch.tensor(self.moves[indices], dtype=torch.long)
                 values = torch.tensor(self.values[indices], dtype=torch.float32)
             else:
                 # Batch load from disk
                 with h5py.File(self.data_path, 'r') as f:
                     positions = torch.from_numpy(f['positions'][indices]).float()
+                    
+                    # Normalize move count (plane 30)
+                    positions[:, 30] = torch.clamp(positions[:, 30] / 100.0, max=1.0)
+                    
                     moves = torch.tensor(f['moves'][indices], dtype=torch.long)
                     values = torch.tensor(f['values'][indices], dtype=torch.float32)
         

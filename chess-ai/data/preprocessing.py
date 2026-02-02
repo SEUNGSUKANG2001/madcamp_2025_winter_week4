@@ -116,7 +116,7 @@ def encode_board(board: chess.Board) -> np.ndarray:
         raise ValueError(f"Expected chess.Board, got {type(board)}")
     
     try:
-        planes = np.zeros((33, 8, 8), dtype=np.float32)
+        planes = np.zeros((33, 8, 8), dtype=np.uint8)
         
         # Piece types: PAWN=1, KNIGHT=2, BISHOP=3, ROOK=4, QUEEN=5, KING=6
         piece_types = [chess.PAWN, chess.KNIGHT, chess.BISHOP, 
@@ -130,7 +130,7 @@ def encode_board(board: chess.Board) -> np.ndarray:
                 for square in chess.scan_forward(piece_mask):
                     row, col = divmod(square, 8)
                     # Flip row for correct orientation (rank 0 = bottom)
-                    planes[plane_idx, 7 - row, col] = 1.0
+                    planes[plane_idx, 7 - row, col] = 1
                 plane_idx += 1
         
         # Planes 12-23: Previous position (if available)
@@ -139,34 +139,36 @@ def encode_board(board: chess.Board) -> np.ndarray:
         
         # Planes 24-27: Castling rights
         if board.has_kingside_castling_rights(chess.WHITE):
-            planes[24, :, :] = 1.0
+            planes[24, :, :] = 1
         if board.has_queenside_castling_rights(chess.WHITE):
-            planes[25, :, :] = 1.0
+            planes[25, :, :] = 1
         if board.has_kingside_castling_rights(chess.BLACK):
-            planes[26, :, :] = 1.0
+            planes[26, :, :] = 1
         if board.has_queenside_castling_rights(chess.BLACK):
-            planes[27, :, :] = 1.0
+            planes[27, :, :] = 1
         
         # Plane 28: En passant square
         if board.ep_square is not None:
             row, col = divmod(board.ep_square, 8)
-            planes[28, 7 - row, col] = 1.0
+            planes[28, 7 - row, col] = 1
         
-        # Plane 29: Color to move (1.0 for white, 0.0 for black)
+        # Plane 29: Color to move (1 for white, 0 for black)
         if board.turn == chess.WHITE:
-            planes[29, :, :] = 1.0
+            planes[29, :, :] = 1
         
-        # Plane 30: Move count (normalized)
-        # Full move number is stored in board.fullmove_number
-        planes[30, :, :] = min(board.fullmove_number / 100.0, 1.0)
+        # Plane 30: Move count (raw integer, capped at 255)
+        # Stored as uint8, will be normalized to range [0, 1] during loading
+        # 255 moves is plenty for practical purposes (longer games capped at 255)
+        move_count = min(board.fullmove_number, 255)
+        planes[30, :, :] = move_count
         
         # Planes 31-32: Repetition counters
         # python-chess doesn't directly expose this, so we approximate
         # by checking if position is repeated
         if board.is_repetition(2):
-            planes[31, :, :] = 1.0
+            planes[31, :, :] = 1
         if board.is_repetition(3):
-            planes[32, :, :] = 1.0
+            planes[32, :, :] = 1
         
         # Planes 33-118: Reserved for additional features
         # Could include: piece-square tables, attack maps, etc.
