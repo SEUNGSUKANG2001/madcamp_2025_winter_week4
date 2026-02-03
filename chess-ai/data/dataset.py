@@ -106,25 +106,25 @@ class ChessDataset(Dataset):
                             self.positions = None  # Will access from dataset directly
                     else:
                         logger.info(f"Loaded game-level dataset: {self.length} games")
-                        # For datasets format, we need to process games to positions
-                        # This is expensive, so we do it lazily during training
-                        # But we need to know the length first
-                        if cache_in_memory:
-                            logger.info("Processing games to positions (this may take a while)...")
-                            self._process_games_to_positions(max_games=self.max_games)
-                        else:
-                            # For lazy loading, we'll process on-the-fly
-                            # But this requires knowing which game contains which position
-                            # For now, we'll estimate length based on average moves per game
-                            # Actual processing will happen during __getitem__
-                            logger.warning(
-                                "Lazy processing for datasets format is slow. "
-                                "Consider using cache_in_memory=True or converting to HDF5 format."
-                            )
-                            # Estimate: average ~40 moves per game, but we'll process on demand
-                            self.positions_cache = None
-                            # We can't know exact length without processing, so use game count as estimate
-                            # Actual positions will be generated on-the-fly
+                    # For datasets format, we need to process games to positions
+                    # This is expensive, so we do it lazily during training
+                    # But we need to know the length first
+                    if cache_in_memory:
+                        logger.info("Processing games to positions (this may take a while)...")
+                        self._process_games_to_positions(max_games=self.max_games)
+                    else:
+                        # For lazy loading, we'll process on-the-fly
+                        # But this requires knowing which game contains which position
+                        # For now, we'll estimate length based on average moves per game
+                        # Actual processing will happen during __getitem__
+                        logger.warning(
+                            "Lazy processing for datasets format is slow. "
+                            "Consider using cache_in_memory=True or converting to HDF5 format."
+                        )
+                        # Estimate: average ~40 moves per game, but we'll process on demand
+                        self.positions_cache = None
+                        # We can't know exact length without processing, so use game count as estimate
+                        # Actual positions will be generated on-the-fly
                     
                     self.is_position_dataset = is_position_dataset
                     return
@@ -267,7 +267,7 @@ class ChessDataset(Dataset):
             if hasattr(self, 'is_position_dataset') and self.is_position_dataset:
                 # Position dataset - use directly
                 if hasattr(self, 'positions') and self.positions is not None and len(self.positions) > 0:
-                    # Use cached positions
+                # Use cached positions
                     position = torch.from_numpy(self.positions[idx]).float()
                     move = torch.tensor(self.moves[idx], dtype=torch.long)
                     value = torch.tensor(self.values[idx], dtype=torch.float32)

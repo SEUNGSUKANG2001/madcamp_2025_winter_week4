@@ -276,8 +276,8 @@ class SupervisedTrainer:
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
                 else:
-                    clip_gradients(self.model, max_norm=1.0)
-                    self.optimizer.step()
+                clip_gradients(self.model, max_norm=1.0)
+                self.optimizer.step()
                 
                 # Zero gradients for next accumulation cycle
                 self.optimizer.zero_grad()
