@@ -86,28 +86,47 @@ class ChessDataset(Dataset):
                     self.dataset = load_dataset_from_datasets(data_path)
                     self.format = 'datasets'
                     self.length = len(self.dataset)
-                    logger.info(f"Loaded HuggingFace dataset: {self.length} games")
                     
-                    # For datasets format, we need to process games to positions
-                    # This is expensive, so we do it lazily during training
-                    # But we need to know the length first
-                    if cache_in_memory:
-                        logger.info("Processing games to positions (this may take a while)...")
-                        self._process_games_to_positions(max_games=self.max_games)
+                    # Check if this is a position-level dataset (already processed)
+                    # Position datasets have 'position', 'move', 'value' columns
+                    # Game datasets have 'moves', 'Site', 'White', etc.
+                    column_names = self.dataset.column_names
+                    is_position_dataset = 'position' in column_names and 'move' in column_names and 'value' in column_names
+                    
+                    if is_position_dataset:
+                        logger.info(f"Loaded position-level dataset: {self.length} positions")
+                        # Position dataset is already processed, use directly
+                        # For large datasets, always use lazy loading to avoid OOM
+                        if cache_in_memory and self.length < 10_000_000:  # Only cache if < 10M samples
+                            logger.info("Caching positions in memory...")
+                            self._cache_positions_from_dataset()
+                        else:
+                            # For lazy loading, we'll access dataset directly
+                            logger.info(f"Using lazy loading for position dataset (size: {self.length:,} samples)")
+                            self.positions = None  # Will access from dataset directly
                     else:
-                        # For lazy loading, we'll process on-the-fly
-                        # But this requires knowing which game contains which position
-                        # For now, we'll estimate length based on average moves per game
-                        # Actual processing will happen during __getitem__
-                        logger.warning(
-                            "Lazy processing for datasets format is slow. "
-                            "Consider using cache_in_memory=True or converting to HDF5 format."
-                        )
-                        # Estimate: average ~40 moves per game, but we'll process on demand
-                        self.positions_cache = None
-                        # We can't know exact length without processing, so use game count as estimate
-                        # Actual positions will be generated on-the-fly
+                        logger.info(f"Loaded game-level dataset: {self.length} games")
+                        # For datasets format, we need to process games to positions
+                        # This is expensive, so we do it lazily during training
+                        # But we need to know the length first
+                        if cache_in_memory:
+                            logger.info("Processing games to positions (this may take a while)...")
+                            self._process_games_to_positions(max_games=self.max_games)
+                        else:
+                            # For lazy loading, we'll process on-the-fly
+                            # But this requires knowing which game contains which position
+                            # For now, we'll estimate length based on average moves per game
+                            # Actual processing will happen during __getitem__
+                            logger.warning(
+                                "Lazy processing for datasets format is slow. "
+                                "Consider using cache_in_memory=True or converting to HDF5 format."
+                            )
+                            # Estimate: average ~40 moves per game, but we'll process on demand
+                            self.positions_cache = None
+                            # We can't know exact length without processing, so use game count as estimate
+                            # Actual positions will be generated on-the-fly
                     
+                    self.is_position_dataset = is_position_dataset
                     return
                 except Exception as e:
                     logger.warning(f"Failed to load as datasets format: {e}")
@@ -130,6 +149,31 @@ class ChessDataset(Dataset):
             with h5py.File(data_path, 'r') as f:
                 self.length = f.attrs['num_samples']
             logger.info(f"Dataset initialized with {self.length} samples (lazy loading)")
+    
+    def _cache_positions_from_dataset(self):
+        """Cache positions from position-level dataset."""
+        logger.info("Caching positions from dataset...")
+        all_positions = []
+        all_moves = []
+        all_values = []
+        
+        # Process in batches to avoid memory issues
+        batch_size = 10000
+        for i in range(0, len(self.dataset), batch_size):
+            batch = self.dataset[i:min(i + batch_size, len(self.dataset))]
+            all_positions.extend(batch['position'])
+            all_moves.extend(batch['move'])
+            all_values.extend(batch['value'])
+            
+            if (i + batch_size) % 100000 == 0:
+                logger.info(f"Cached {i + batch_size}/{len(self.dataset)} positions...")
+        
+        # Convert to numpy arrays
+        self.positions = np.stack(all_positions)
+        self.moves = np.array(all_moves, dtype=np.int32)
+        self.values = np.array(all_values, dtype=np.float32)
+        
+        logger.info(f"Cached {len(self.positions)} positions")
     
     def _process_games_to_positions(self, max_games: Optional[int] = None):
         """Process games from datasets format to positions."""
@@ -219,9 +263,29 @@ class ChessDataset(Dataset):
             Tuple of (position, move, value) as torch tensors
         """
         if self.format == 'datasets':
-            # For datasets format, we need to process on-the-fly or use cache
-            if hasattr(self, 'positions') and len(self.positions) > 0:
-                # Use cached positions
+            # Check if this is a position dataset
+            if hasattr(self, 'is_position_dataset') and self.is_position_dataset:
+                # Position dataset - use directly
+                if hasattr(self, 'positions') and self.positions is not None and len(self.positions) > 0:
+                    # Use cached positions
+                    position = torch.from_numpy(self.positions[idx]).float()
+                    move = torch.tensor(self.moves[idx], dtype=torch.long)
+                    value = torch.tensor(self.values[idx], dtype=torch.float32)
+                else:
+                    # Lazy load from dataset (efficient for large datasets)
+                    sample = self.dataset[idx]
+                    # Convert to numpy first for better performance
+                    position = np.array(sample['position'], dtype=np.float32)
+                    position = torch.from_numpy(position)
+                    move = torch.tensor(sample['move'], dtype=torch.long)
+                    value = torch.tensor(sample['value'], dtype=torch.float32)
+                
+                # Normalize move count (plane 30) - already normalized in preprocessing, but ensure it's in [0, 1]
+                # The position was stored as float32 with normalized values, so no need to normalize again
+                # But ensure it's clamped to [0, 1] just in case
+                position[30] = torch.clamp(position[30], 0.0, 1.0)
+            elif hasattr(self, 'positions') and len(self.positions) > 0:
+                # Use cached positions (from game dataset processing)
                 # Load as float, then normalize
                 position = torch.from_numpy(self.positions[idx]).float()
                 
@@ -281,7 +345,23 @@ class ChessDataset(Dataset):
             Tuple of batched (positions, moves, values)
         """
         if self.format == 'datasets':
-            if hasattr(self, 'positions') and len(self.positions) > 0:
+            if hasattr(self, 'is_position_dataset') and self.is_position_dataset:
+                # Position dataset
+                if hasattr(self, 'positions') and self.positions is not None and len(self.positions) > 0:
+                    positions = torch.from_numpy(self.positions[indices]).float()
+                    moves = torch.tensor(self.moves[indices], dtype=torch.long)
+                    values = torch.tensor(self.values[indices], dtype=torch.float32)
+                else:
+                    # Batch load from dataset (more efficient than select for large batches)
+                    # Use list comprehension for better memory efficiency
+                    batch_data = [self.dataset[i] for i in indices]
+                    positions = torch.tensor([d['position'] for d in batch_data], dtype=torch.float32)
+                    moves = torch.tensor([d['move'] for d in batch_data], dtype=torch.long)
+                    values = torch.tensor([d['value'] for d in batch_data], dtype=torch.float32)
+                
+                # Ensure move count is normalized (already normalized, but clamp to be safe)
+                positions[:, 30] = torch.clamp(positions[:, 30], 0.0, 1.0)
+            elif hasattr(self, 'positions') and len(self.positions) > 0:
                 positions = torch.from_numpy(self.positions[indices]).float()
                 
                 # Normalize move count (plane 30)
@@ -356,11 +436,27 @@ def create_data_loaders(
     else:
         check_path = train_path
     
-    # Determine if we need to cache in memory (datasets format requires it)
+    # Determine if we need to cache in memory
+    # For position datasets, we can use lazy loading (much more memory efficient)
     need_cache = False
     if format == 'auto' or format == 'datasets':
         if os.path.isdir(check_path) and DATASETS_AVAILABLE:
-            need_cache = True  # datasets format requires cache_in_memory
+            # Check if it's a position dataset (can use lazy loading)
+            try:
+                from datasets import load_from_disk
+                test_ds = load_from_disk(check_path)
+                is_position_ds = 'position' in test_ds.column_names and 'move' in test_ds.column_names
+                # Only cache if it's a game dataset (needs processing) or small position dataset
+                if not is_position_ds:
+                    need_cache = True  # Game datasets need processing
+                elif len(test_ds) < 10_000_000:  # Only cache small position datasets
+                    need_cache = True
+                else:
+                    need_cache = False  # Large position datasets use lazy loading
+                    logger.info(f"Large position dataset detected ({len(test_ds):,} samples), using lazy loading")
+            except Exception as e:
+                logger.warning(f"Could not check dataset type: {e}, defaulting to cache")
+                need_cache = True
     
     train_dataset = ChessDataset(
         data_path=train_path,
@@ -382,22 +478,29 @@ def create_data_loaders(
         script_path=script_path
     )
     
+    # For lazy loading, use more workers for parallel data loading
+    # For cached data, workers are less useful
+    train_num_workers = 0 if need_cache else max(num_workers, 8)  # More workers for lazy loading
+    val_num_workers = 0 if need_cache else max(2, num_workers // 2)
+    
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=num_workers,
+        num_workers=train_num_workers,
         pin_memory=pin_memory,
-        persistent_workers=num_workers > 0
+        persistent_workers=train_num_workers > 0,
+        prefetch_factor=2 if train_num_workers > 0 else None  # Prefetch batches
     )
     
     val_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=0 if need_cache else 2,  # No workers needed for cached data
+        num_workers=val_num_workers,
         pin_memory=pin_memory,
-        persistent_workers=False if need_cache else (num_workers > 0)
+        persistent_workers=val_num_workers > 0,
+        prefetch_factor=2 if val_num_workers > 0 else None
     )
     
     logger.info(f"Created data loaders: train={len(train_dataset)}, val={len(val_dataset)}")

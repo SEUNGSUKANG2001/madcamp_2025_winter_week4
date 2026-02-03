@@ -180,6 +180,9 @@ class SupervisedTrainer:
         self.use_amp = config.get('use_mixed_precision', True)
         self.scaler = torch.cuda.amp.GradScaler() if self.use_amp else None
         
+        # Gradient accumulation for effective larger batch size
+        self.gradient_accumulation_steps = config.get('gradient_accumulation_steps', 1)
+        
         # Training state
         self.current_epoch = 0
         self.best_val_loss = float('inf')
@@ -237,12 +240,13 @@ class SupervisedTrainer:
         
         pbar = tqdm(self.train_loader, desc=f"Epoch {self.current_epoch+1}")
         
+        # Gradient accumulation: only zero gradients at the start
+        self.optimizer.zero_grad()
+        
         for batch_idx, (positions, moves, values) in enumerate(pbar):
             positions = positions.to(self.device)
             moves = moves.to(self.device)
             values = values.to(self.device)
-            
-            self.optimizer.zero_grad()
             
             # Forward pass
             if self.use_amp and self.scaler is not None:
@@ -251,27 +255,40 @@ class SupervisedTrainer:
                     loss, loss_dict = self.criterion(
                         policy_pred, moves, value_pred, values
                     )
+                    # Scale loss by accumulation steps
+                    loss = loss / self.gradient_accumulation_steps
                 
                 # Backward pass with gradient scaling
                 self.scaler.scale(loss).backward()
-                clip_gradients(self.model, max_norm=1.0)
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
             else:
                 policy_pred, value_pred = self.model(positions)
                 loss, loss_dict = self.criterion(
                     policy_pred, moves, value_pred, values
                 )
-                
+                # Scale loss by accumulation steps
+                loss = loss / self.gradient_accumulation_steps
                 loss.backward()
-                clip_gradients(self.model, max_norm=1.0)
-                self.optimizer.step()
             
-            # Update metrics
+            # Update weights only after accumulating gradients
+            if (batch_idx + 1) % self.gradient_accumulation_steps == 0:
+                if self.use_amp and self.scaler is not None:
+                    clip_gradients(self.model, max_norm=1.0)
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    clip_gradients(self.model, max_norm=1.0)
+                    self.optimizer.step()
+                
+                # Zero gradients for next accumulation cycle
+                self.optimizer.zero_grad()
+            
+            # Update metrics (use original loss_dict, not scaled loss)
             batch_size = positions.size(0)
-            total_loss += loss_dict['total_loss'] * batch_size
-            total_policy_loss += loss_dict['policy_loss'] * batch_size
-            total_value_loss += loss_dict['value_loss'] * batch_size
+            # Multiply by accumulation steps to get true loss value
+            scale_factor = self.gradient_accumulation_steps
+            total_loss += loss_dict['total_loss'] * batch_size * scale_factor
+            total_policy_loss += loss_dict['policy_loss'] * batch_size * scale_factor
+            total_value_loss += loss_dict['value_loss'] * batch_size * scale_factor
             total_samples += batch_size
             
             # Compute accuracies

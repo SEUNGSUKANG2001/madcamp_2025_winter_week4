@@ -116,7 +116,8 @@ def encode_board(board: chess.Board) -> np.ndarray:
         raise ValueError(f"Expected chess.Board, got {type(board)}")
     
     try:
-        planes = np.zeros((33, 8, 8), dtype=np.uint8)
+        # Use float32 to support normalized move count in plane 30
+        planes = np.zeros((33, 8, 8), dtype=np.float32)
         
         # Piece types: PAWN=1, KNIGHT=2, BISHOP=3, ROOK=4, QUEEN=5, KING=6
         piece_types = [chess.PAWN, chess.KNIGHT, chess.BISHOP, 
@@ -156,11 +157,12 @@ def encode_board(board: chess.Board) -> np.ndarray:
         if board.turn == chess.WHITE:
             planes[29, :, :] = 1
         
-        # Plane 30: Move count (raw integer, capped at 255)
-        # Stored as uint8, will be normalized to range [0, 1] during loading
-        # 255 moves is plenty for practical purposes (longer games capped at 255)
+        # Plane 30: Move count (normalized to [0, 1])
+        # Normalize move count by dividing by 255 (max practical game length)
+        # This ensures the value is in range [0, 1] for neural network training
         move_count = min(board.fullmove_number, 255)
-        planes[30, :, :] = move_count
+        normalized_move_count = move_count / 255.0
+        planes[30, :, :] = normalized_move_count
         
         # Planes 31-32: Repetition counters
         # python-chess doesn't directly expose this, so we approximate

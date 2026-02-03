@@ -43,14 +43,20 @@ def main():
                        help='Directory to save checkpoints')
     parser.add_argument('--epochs', type=int, default=50,
                        help='Number of training epochs')
-    parser.add_argument('--batch-size', type=int, default=256,
-                       help='Batch size')
+    parser.add_argument('--save-every', type=int, default=10,
+                       help='Save checkpoint every N epochs (default: 10)')
+    parser.add_argument('--batch-size', type=int, default=512,
+                       help='Batch size (default: 512, increase for better VRAM utilization)')
+    parser.add_argument('--gradient-accumulation-steps', type=int, default=1,
+                       help='Number of gradient accumulation steps (effective batch size = batch_size * gradient_accumulation_steps)')
     parser.add_argument('--learning-rate', type=float, default=1e-3,
                        help='Learning rate')
     parser.add_argument('--device', type=str, default='auto',
                        help='Device to train on (cuda/cpu/auto). auto will use CUDA if available, otherwise CPU')
     parser.add_argument('--min-elo', type=int, default=2600,
                        help='Minimum ELO rating for filtering')
+    parser.add_argument('--num-workers', type=int, default=8,
+                       help='Number of worker processes for data loading (default: 8, use more for lazy loading)')
     parser.add_argument('--wandb-project', type=str, default='chess-ai',
                        help='Wandb project name')
     parser.add_argument('--wandb-run-name', type=str, default=None,
@@ -73,7 +79,7 @@ def main():
         train_dataset_name=args.train_dataset_name,
         val_dataset_name=args.val_dataset_name,
         batch_size=args.batch_size,
-        num_workers=4,
+        num_workers=args.num_workers,
         augment_train=True,
         format=args.format,
         min_elo=args.min_elo,
@@ -94,18 +100,24 @@ def main():
         'value_weight': 1.0,
         'use_mixed_precision': True,
         'checkpoint_dir': args.checkpoint_dir,
+        'gradient_accumulation_steps': args.gradient_accumulation_steps,
         'use_wandb': not args.no_wandb,
         'wandb_project': args.wandb_project,
         'wandb_run_name': args.wandb_run_name,
         'wandb_entity': args.wandb_entity,
     }
     
+    # Log effective batch size
+    effective_batch_size = args.batch_size * args.gradient_accumulation_steps
+    logger.info(f"Batch size: {args.batch_size}, Gradient accumulation: {args.gradient_accumulation_steps}")
+    logger.info(f"Effective batch size: {effective_batch_size}")
+    
     # Create trainer
     trainer = SupervisedTrainer(model, train_loader, val_loader, config)
     
     # Train
     logger.info("Starting training...")
-    trainer.train(num_epochs=args.epochs, save_every=10)
+    trainer.train(num_epochs=args.epochs, save_every=args.save_every)
     
     logger.info("Training completed!")
 
