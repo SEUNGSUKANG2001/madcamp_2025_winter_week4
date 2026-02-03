@@ -22,4 +22,4 @@ experiments/
 .vscode/
 .idea/
 .DS_Store
-.checkpoints/
+checkpoints/
