@@ -185,6 +185,7 @@ class SupervisedTrainer:
         
         # Training state
         self.current_epoch = 0
+        self.global_step = 0  # Track global step for wandb
         self.best_val_loss = float('inf')
         self.checkpoint_dir = config.get('checkpoint_dir', 'checkpoints')
         
@@ -193,12 +194,17 @@ class SupervisedTrainer:
         self.wandb_project = config.get('wandb_project', 'chess-ai')
         self.wandb_run_name = config.get('wandb_run_name', None)
         self.wandb_entity = config.get('wandb_entity', None)
+        self.wandb_run_id = config.get('wandb_run_id', None)  # For resuming
         
         if self.use_wandb:
+            # Resume from existing run if run_id provided
+            resume_mode = 'allow' if self.wandb_run_id else None
             wandb.init(
                 project=self.wandb_project,
                 name=self.wandb_run_name,
                 entity=self.wandb_entity,
+                id=self.wandb_run_id,  # Resume existing run
+                resume=resume_mode,
                 config={
                     'learning_rate': lr,
                     'weight_decay': weight_decay,
@@ -214,6 +220,8 @@ class SupervisedTrainer:
                     'model_type': 'HybridChessNet',
                 }
             )
+            # Store run_id for saving to checkpoint
+            self.wandb_run_id = wandb.run.id
             logger.info(f"Wandb initialized: project={self.wandb_project}, run={self.wandb_run_name}")
         elif config.get('use_wandb', True) and not WANDB_AVAILABLE:
             logger.warning("Wandb requested but not available. Install with: pip install wandb")
@@ -276,8 +284,8 @@ class SupervisedTrainer:
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
                 else:
-                clip_gradients(self.model, max_norm=1.0)
-                self.optimizer.step()
+                    clip_gradients(self.model, max_norm=1.0)
+                    self.optimizer.step()
                 
                 # Zero gradients for next accumulation cycle
                 self.optimizer.zero_grad()
@@ -312,8 +320,9 @@ class SupervisedTrainer:
                     'train/batch_top3_acc': accuracies['top_3_accuracy'],
                     'train/batch_top5_acc': accuracies['top_5_accuracy'],
                     'train/learning_rate': self.optimizer.param_groups[0]['lr'],
-                    'train/batch': self.current_epoch * len(self.train_loader) + batch_idx,
-                })
+                }, step=self.global_step)
+            
+            self.global_step += 1  # Increment after each batch
         
         # Average metrics
         metrics = {
@@ -394,7 +403,7 @@ class SupervisedTrainer:
         """
         logger.info(f"Starting training for {num_epochs} epochs")
         
-        for epoch in range(num_epochs):
+        for epoch in range(self.current_epoch, num_epochs):
             self.current_epoch = epoch
             
             # Train
@@ -431,7 +440,7 @@ class SupervisedTrainer:
                     'val/top5_accuracy': val_metrics['val_top_5_accuracy'],
                     'learning_rate': self.optimizer.param_groups[0]['lr'],
                 }
-                wandb.log(log_dict)
+                wandb.log(log_dict, step=self.global_step)
             
             # Save checkpoint
             is_best = val_metrics['val_loss'] < self.best_val_loss
@@ -450,11 +459,13 @@ class SupervisedTrainer:
                     checkpoint_path,
                     scheduler=self.scheduler,
                     metrics={**train_metrics, **val_metrics},
-                    is_best=is_best
+                    is_best=is_best,
+                    wandb_run_id=self.wandb_run_id if self.use_wandb else None,
+                    global_step=self.global_step
                 )
                 
                 # Log checkpoint to wandb as artifact (optional, can be disabled for large checkpoints)
-                if self.use_wandb and config.get('wandb_log_checkpoints', False):
+                if self.use_wandb and self.config.get('wandb_log_checkpoints', False):
                     artifact = wandb.Artifact(f"checkpoint-epoch-{epoch+1}", type="model")
                     artifact.add_file(checkpoint_path)
                     wandb.log_artifact(artifact)

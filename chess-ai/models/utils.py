@@ -46,7 +46,9 @@ def save_checkpoint(
     path: str,
     scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
     metrics: Optional[Dict] = None,
-    is_best: bool = False
+    is_best: bool = False,
+    wandb_run_id: Optional[str] = None,
+    global_step: int = 0
 ):
     """
     Save model checkpoint with optimizer state.
@@ -74,6 +76,11 @@ def save_checkpoint(
     
     if metrics is not None:
         checkpoint['metrics'] = metrics
+    
+    if wandb_run_id is not None:
+        checkpoint['wandb_run_id'] = wandb_run_id
+    
+    checkpoint['global_step'] = global_step
     
     torch.save(checkpoint, path)
     

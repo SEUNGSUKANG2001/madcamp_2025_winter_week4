@@ -16,6 +16,7 @@ project_root = os.path.abspath(os.path.join(script_dir, "../.."))
 sys.path.insert(0, os.path.join(project_root, "chess-ai"))
 
 from models.architecture import HybridChessNet
+from models.utils import load_checkpoint
 from training.supervised import SupervisedTrainer
 from data.dataset import create_data_loaders
 
@@ -41,6 +42,8 @@ def main():
                        help='Dataset format')
     parser.add_argument('--checkpoint-dir', type=str, default='checkpoints',
                        help='Directory to save checkpoints')
+    parser.add_argument('--resume-from', type=str, default=None,
+                       help='Path to checkpoint to resume from')
     parser.add_argument('--epochs', type=int, default=50,
                        help='Number of training epochs')
     parser.add_argument('--save-every', type=int, default=10,
@@ -66,6 +69,9 @@ def main():
     parser.add_argument('--no-wandb', action='store_true',
                        help='Disable wandb logging')
     
+    parser.add_argument('--val-ratio', type=float, default=0.01,
+                       help='Ratio of data to use for validation if val-data is not provided (default: 0.1)')
+    
     args = parser.parse_args()
     
     # Get script path for project root detection
@@ -83,7 +89,8 @@ def main():
         augment_train=True,
         format=args.format,
         min_elo=args.min_elo,
-        script_path=script_path
+        script_path=script_path,
+        val_ratio=args.val_ratio
     )
     
     # Create model
@@ -112,9 +119,49 @@ def main():
     logger.info(f"Batch size: {args.batch_size}, Gradient accumulation: {args.gradient_accumulation_steps}")
     logger.info(f"Effective batch size: {effective_batch_size}")
     
+    # Resume from checkpoint if specified (load run_id before creating trainer)
+    wandb_run_id = None
+    if args.resume_from:
+        logger.info(f"Loading checkpoint from {args.resume_from}")
+        try:
+            checkpoint = torch.load(args.resume_from, map_location='cpu')
+            wandb_run_id = checkpoint.get('wandb_run_id', None)
+            if wandb_run_id:
+                logger.info(f"Found wandb run_id: {wandb_run_id}")
+        except Exception as e:
+            logger.warning(f"Could not load wandb_run_id from checkpoint: {e}")
+    
+    # Add wandb_run_id to config for resume
+    if wandb_run_id:
+        config['wandb_run_id'] = wandb_run_id
+    
     # Create trainer
     trainer = SupervisedTrainer(model, train_loader, val_loader, config)
     
+    # Resume model/optimizer/scheduler from checkpoint if specified
+    if args.resume_from:
+        logger.info(f"Resuming training from {args.resume_from}")
+        try:
+            start_epoch, metrics = load_checkpoint(
+                args.resume_from, 
+                trainer.model, 
+                trainer.optimizer, 
+                trainer.scheduler, 
+                trainer.device
+            )
+            trainer.current_epoch = start_epoch
+            # Restore global_step from checkpoint if available
+            ckpt = torch.load(args.resume_from, map_location='cpu')
+            if 'global_step' in ckpt:
+                trainer.global_step = ckpt['global_step']
+                logger.info(f"Restored global_step: {trainer.global_step}")
+            logger.info(f"Resumed from epoch {start_epoch}")
+            if metrics:
+                logger.info(f"Previous metrics: {metrics}")
+        except Exception as e:
+            logger.error(f"Failed to resume from checkpoint: {e}")
+            return
+
     # Train
     logger.info("Starting training...")
     trainer.train(num_epochs=args.epochs, save_every=args.save_every)

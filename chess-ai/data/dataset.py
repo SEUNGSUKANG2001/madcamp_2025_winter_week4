@@ -30,6 +30,37 @@ from data.augmentation import augment_game_data
 logger = logging.getLogger(__name__)
 
 
+def process_sample(sample):
+    """Process a single sample for training."""
+    # Convert to torch if numpy
+    if isinstance(sample['position'], np.ndarray):
+        position = torch.from_numpy(sample['position'])
+    else:
+        position = torch.tensor(sample['position'])
+        
+    # Check if we need to convert type (if it was uint8/float stored)
+    position = position.float()
+        
+    # Plane 30: Move count normalization
+    # If using processed_position dataset, rule is:
+    # If > 1.0 (raw value), divide by 100.
+    # Currently implementation assumes raw values if it's from datasets?
+    # Actually, verify logic from __getitem__:
+    # position[30] = torch.clamp(position[30] / 100.0, max=1.0)
+    # Be safe: check range
+    if position[30].max() > 1.05: # strict 1.0 might flag float errors
+         position[30] = torch.clamp(position[30] / 100.0, max=1.0)
+    
+    # Moves and values
+    move = torch.tensor(sample['move'], dtype=torch.long)
+    value = torch.tensor(sample['value'], dtype=torch.float32)
+    
+    return {
+        'position': position,
+        'move': move, 
+        'value': value
+    }
+
 class ChessDataset(Dataset):
     """
     PyTorch Dataset for chess positions.
@@ -75,6 +106,21 @@ class ChessDataset(Dataset):
             if dataset_name is None:
                 dataset_name = "chess_dataset"
             data_path = get_dataset_path(dataset_name, script_path)
+            
+        # Try to resolve path if it doesn't exist directly
+        if not os.path.exists(data_path) and script_path:
+            # Try relative to project root
+            try:
+                # script_path is likely .../scripts/train_supervised.py
+                # project_root is .../
+                current_dir = os.path.dirname(os.path.abspath(script_path))
+                project_root = os.path.dirname(current_dir)
+                possible_path = os.path.join(project_root, data_path)
+                if os.path.exists(possible_path):
+                    logger.info(f"Resolved dataset path: {possible_path}")
+                    data_path = possible_path
+            except Exception:
+                pass
         
         self.data_path = data_path
         
@@ -406,7 +452,8 @@ def create_data_loaders(
     pin_memory: bool = True,
     format: str = 'auto',
     min_elo: int = 2600,
-    script_path: Optional[str] = None
+    script_path: Optional[str] = None,
+    val_ratio: float = 0.1
 ) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
     """
     Create PyTorch DataLoaders for training and validation.
@@ -423,6 +470,7 @@ def create_data_loaders(
         format: Dataset format ('hdf5', 'datasets', or 'auto')
         min_elo: Minimum ELO for filtering
         script_path: Path to calling script (for project root detection)
+        val_ratio: Ratio of data to use for validation if val_path is not provided
         
     Returns:
         Tuple of (train_loader, val_loader)
@@ -468,15 +516,53 @@ def create_data_loaders(
         script_path=script_path
     )
     
-    val_dataset = ChessDataset(
-        data_path=val_path,
-        dataset_name=val_dataset_name,
-        format=format,
-        augment=False,  # No augmentation for validation
-        cache_in_memory=need_cache,  # Auto-detect based on format
-        min_elo=min_elo,
-        script_path=script_path
-    )
+    # Check if we should use 10% subset for large datasets (BEFORE validation split)
+    # This must happen before random_split to access train_dataset.dataset
+    is_large = False
+    if hasattr(train_dataset, 'length') and train_dataset.length > 20_000_000:
+        is_large = True
+    
+    if is_large and hasattr(train_dataset, 'dataset'):
+        logger.info("Large dataset detected - using 10% subset for memory efficiency...")
+        
+        # Get underlying HF dataset
+        hf_ds = train_dataset.dataset
+        total_len = len(hf_ds)
+        
+        # Use first 10% of data (contiguous for speed)
+        subset_size = int(total_len * 0.1)
+        logger.info(f"Subsampling: using {subset_size:,} from {total_len:,} samples (10%)")
+        
+        hf_subset = hf_ds.select(range(subset_size))
+        
+        # Update existing train_dataset to use subset (don't create new object)
+        train_dataset.dataset = hf_subset
+        train_dataset.length = len(hf_subset)
+    
+    val_dataset = None
+    if val_path is not None or val_dataset_name is not None:
+        # Separate validation dataset provided
+        val_dataset = ChessDataset(
+            data_path=val_path,
+            dataset_name=val_dataset_name,
+            format=format,
+            augment=False,  # No augmentation for validation
+            cache_in_memory=need_cache,  # Auto-detect based on format
+            min_elo=min_elo,
+            script_path=script_path
+        )
+    else:
+        # Split training dataset
+        logger.info(f"No validation dataset provided. Splitting training data (ratio={val_ratio})")
+        val_size = int(len(train_dataset) * val_ratio)
+        train_size = len(train_dataset) - val_size
+        train_dataset, val_dataset = torch.utils.data.random_split(
+            train_dataset, [train_size, val_size]
+        )
+        logger.info(f"Split result: train={len(train_dataset)}, val={len(val_dataset)}")
+    
+    
+    # Standard Map-style loading logic (Fallback)
     
     # For lazy loading, use more workers for parallel data loading
     # For cached data, workers are less useful
