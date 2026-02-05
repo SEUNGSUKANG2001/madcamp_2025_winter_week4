@@ -1,25 +1,55 @@
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
 
-# Environments
+# Virtual Environments
 .venv/
-.env
+venv/
+ENV/
+env/
 
-# Project Data
-data/raw/*
-!data/raw/.gitkeep
-data/processed/*
-data/processed_position/*
-!data/processed/.gitkeep
-!data/processed_position/.gitkeep
-
-# Training & Logs
+# Machine Learning / Training
+checkpoints/
+*.pt
+*.pth
+*.ckpt
 wandb/
-experiments/
+runs/
+*.log
 
-# IDEs
+# Data
+data/
+*.csv
+*.pkl
+*.pickle
+
+# IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
-checkpoints/
+Thumbs.db
+*.bak
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Environment variables
+.env
+.env.local
+
+# Cache
+.cache/
+*.cache

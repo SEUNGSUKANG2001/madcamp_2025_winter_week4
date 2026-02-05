@@ -1,0 +1,7 @@
+flask
+flask-cors
+chess
+torch
+transformers
+peft
+wandb
