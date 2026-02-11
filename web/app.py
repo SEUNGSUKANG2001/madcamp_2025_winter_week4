@@ -30,18 +30,18 @@ try:
     )
     model = get_peft_model(model, config)
     
-    # 3. 최신 체크포인트 찾기 및 로드
-    if os.path.exists(CHECKPOINT_DIR):
-        cps = [f for f in os.listdir(CHECKPOINT_DIR) if f.endswith('.pt')]
-        if cps:
-            latest_cp = max(cps, key=lambda x: os.path.getmtime(os.path.join(CHECKPOINT_DIR, x)))
-            print(f"Applying checkpoint: {latest_cp}")
-            checkpoint = torch.load(os.path.join(CHECKPOINT_DIR, latest_cp), map_location=device)
-            model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-        else:
-            print("No checkpoints found. Using base model with LoRA layers initialized.")
+    # 3. 특정 체크포인트 로드 (ep2900)
+    target_checkpoint = "chess_ai_rl_ep2900.pt"
+    checkpoint_path = os.path.join(CHECKPOINT_DIR, target_checkpoint)
+    
+    if os.path.exists(checkpoint_path):
+        print(f"Loading checkpoint: {target_checkpoint}")
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        print(f"Successfully loaded checkpoint: {target_checkpoint}")
     else:
-        print(f"Checkpoint directory not found at {CHECKPOINT_DIR}")
+        print(f"Warning: Checkpoint {target_checkpoint} not found at {checkpoint_path}")
+        print("Using base model with LoRA layers initialized.")
 
     model = model.to(device)
     model.eval()

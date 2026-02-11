@@ -254,6 +254,78 @@
             }
         }
 
+        /* Color Selection Modal */
+        #color-modal {
+            display: flex;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(11, 14, 20, 0.95);
+            backdrop-filter: blur(8px);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .color-modal-content {
+            background: var(--card-bg);
+            border-radius: 24px;
+            padding: 3rem;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            border: 1px solid #30363d;
+            text-align: center;
+            max-width: 500px;
+        }
+
+        .color-modal-content h2 {
+            margin: 0 0 1rem 0;
+            font-size: 2.2rem;
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+
+        .color-modal-content p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            margin-bottom: 2.5rem;
+        }
+
+        .color-choice-btns {
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .color-choice-btn {
+            flex: 1;
+            padding: 2rem 1.5rem;
+            border-radius: 16px;
+            border: 2px solid #30363d;
+            background: #21262d;
+            color: var(--text-primary);
+            font-weight: 600;
+            font-size: 1.3rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .color-choice-btn:hover {
+            border-color: var(--accent-color);
+            background: rgba(88, 166, 255, 0.1);
+            transform: translateY(-4px);
+            box-shadow: 0 8px 20px rgba(88, 166, 255, 0.2);
+        }
+
+        .piece-icon {
+            font-size: 4rem;
+            filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
+        }
+
         /* Responsive */
         @media (max-width: 1000px) {
             .container {
@@ -278,6 +350,23 @@
 
 <body>
 
+    <div id="color-modal">
+        <div class="color-modal-content">
+            <h2>Choose Your Color</h2>
+            <p>Select which side you want to play as</p>
+            <div class="color-choice-btns">
+                <button class="color-choice-btn" onclick="selectColor('white')">
+                    <span class="piece-icon">♔</span>
+                    <span>Play as White</span>
+                </button>
+                <button class="color-choice-btn" onclick="selectColor('black')">
+                    <span class="piece-icon">♚</span>
+                    <span>Play as Black</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <div id="loading-overlay">
         <div class="spinner"></div>
         <p style="margin-top: 1.5rem; font-weight: 300; letter-spacing: 1px;">AI IS THINKING</p>
@@ -292,6 +381,13 @@
                         <path d="M1.172 8A6.828 6.828 0 1 1 8 14.828V13.5A5.5 5.5 0 1 0 2.5 8H4L2 10.5 0 8h1.172z" />
                     </svg>
                     Reset Game
+                </button>
+                <button id="flipBtn">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path
+                            d="M8 3.293l2.146 2.147a.5.5 0 0 0 .708-.708L8 1.879 5.146 4.732a.5.5 0 1 0 .708.708L8 3.293zm-.5 9.414L5.354 10.56a.5.5 0 1 0-.708.708L8 14.121l2.854-2.853a.5.5 0 0 0-.708-.708L8.5 12.707V3.293z" />
+                    </svg>
+                    Flip Board
                 </button>
                 <button id="undoBtn">
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -353,10 +449,60 @@
         var $status = $('#status');
         var $topMovesList = $('#topMovesList');
         var $loading = $('#loading-overlay');
+        var playerColor = null; // 'white' or 'black'
+
+        function selectColor(color) {
+            playerColor = color;
+            $('#color-modal').hide();
+
+            // Configure board orientation
+            var config = {
+                draggable: true,
+                position: 'start',
+                onDragStart: onDragStart,
+                onDrop: onDrop,
+                onSnapEnd: onSnapEnd,
+                orientation: color,
+                pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
+            };
+            board = Chessboard('myBoard', config);
+            updateStatus();
+
+            // If playing as black, AI makes first move
+            if (color === 'black') {
+                window.setTimeout(makeAiMove, 500);
+            } else {
+                // If playing as white, show suggestions for player's first move
+                window.setTimeout(showPlayerSuggestions, 300);
+            }
+        }
 
         function onDragStart(source, piece, position, orientation) {
             if (game.game_over()) return false;
-            if (piece.search(/^b/) !== -1) return false;
+
+            // Prevent dragging opponent's pieces
+            if (playerColor === 'white' && piece.search(/^b/) !== -1) return false;
+            if (playerColor === 'black' && piece.search(/^w/) !== -1) return false;
+        }
+
+        function showPlayerSuggestions() {
+            // Show AI suggestions for player's turn
+            fetch('/api/move', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fen: game.fen() })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        console.error(data.error);
+                        return;
+                    }
+                    updateAnalysis(data);
+                })
+                .catch(err => {
+                    console.error('Fetch error:', err);
+                });
         }
 
         function makeAiMove() {
@@ -385,6 +531,9 @@
                     board.position(game.fen());
                     updateStatus();
                     updateAnalysis(data);
+
+                    // Show suggestions for player's next move
+                    window.setTimeout(showPlayerSuggestions, 300);
                 })
                 .catch(err => {
                     $loading.hide();
@@ -462,21 +611,14 @@
             $status.html(status);
         }
 
-        var config = {
-            draggable: true,
-            position: 'start',
-            onDragStart: onDragStart,
-            onDrop: onDrop,
-            onSnapEnd: onSnapEnd,
-            pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
-        };
-        board = Chessboard('myBoard', config);
-
-        updateStatus();
+        // Board will be initialized after color selection
 
         $('#resetBtn').on('click', function () {
+            // Show color selection modal again
+            $('#color-modal').show();
+            playerColor = null;
             game.reset();
-            board.start();
+            if (board) board.start();
             updateStatus();
             $topMovesList.html('<li style="padding: 1rem; color: var(--text-secondary); font-style: italic; text-align: center;">Make a move to see AI analysis...</li>');
             $('.eval-black').css('width', '33.33%');
@@ -486,6 +628,10 @@
             $('#prob-draw').text('100.0%');
             $('#prob-white').text('0.0%');
             $('#advantage-text').text('Score: 0.00');
+        });
+
+        $('#flipBtn').on('click', function () {
+            if (board) board.flip();
         });
 
         $('#undoBtn').on('click', function () {
